@@ -102,22 +102,20 @@ passport.serializeUser(User.serializeUser()); // store in a session. serializeUs
 passport.deserializeUser(User.deserializeUser()); // unstore in a session
 
 
-app.use((req, res, next) => { // we should do this before any of the route handlers and only after app.use for session and flash(as they( flash and session ) are needed to run flash)
-    res.locals = req.user;
-    next();
-}) // this should be places after above authentication part to add req.user into locals.
+// app.use((req, res, next) => { // we should do this before any of the route handlers and only after app.use for session and flash(as they( flash and session ) are needed to run flash)
+//     res.locals.currentUser = req.user;
+//     next();
+// }) // this should be places after above authentication part to add req.user into locals.
 
-const user = 'admin';
 
 app.get('/home', isLoggedIn, async (req, res) => {
     var events = [];
     const cursor = collection.find({}).toArray((err, result) => {
-        for(let i of result) events.push(i);
-        return res.render('home', {events});
+        for (let i of result) events.push(i);
+        return res.render('home', { events });
     })
     return;
 })
-
 
 const authRoute = require('./routes/auth');
 const e = require('express');
@@ -127,7 +125,7 @@ app.use('/auth', authRoute);
 
 //ADMIN
 app.get('/event/:id/makeForm', isLoggedIn, (req, res) => {
-    if (user == "admin") {
+    if (req.user && req.user.isAdmin === true) {
         res.sendFile('index.html', { root: path.join(__dirname, '../build/') });
     } else {
         res.send("You are not allowed to view this page");
@@ -136,7 +134,7 @@ app.get('/event/:id/makeForm', isLoggedIn, (req, res) => {
 
 //ADMIN
 app.post("/event/:id/submit", isLoggedIn, (req, res) => {
-    if (user == "admin") {
+    if (req.user && req.user.isAdmin === true) {
         collection.findOne({ "Event": req.params.id }).then((resp) => {
             resp["comps"] = req.body.comps;
             collection.findOneAndReplace({ "Event": req.params.id }, resp).then((resp) => {
@@ -148,6 +146,7 @@ app.post("/event/:id/submit", isLoggedIn, (req, res) => {
     }
 })
 
+// displaying the form
 app.get("/event/:id/formData", isLoggedIn, (req, res) => {
     collection.findOne({ "Event": req.params.id }).then((resp) => {
         resp["eventID"] = req.params.id;
@@ -163,6 +162,14 @@ app.get("/event/:id/apply", isLoggedIn, (req, res) => {
 })
 
 app.post("/event/:id/submitForm", isLoggedIn, upload.any(), async (req, res) => {
+
+    for (var key of Object.keys(req.body)) {
+        if (key != "files" && req.body[key].trim() == "") {
+            eFlag = 1;
+            return res.send("error, fill all fields corectly and apply again");
+        }
+    }
+
     let data = {}
     let files = {}
 
@@ -171,10 +178,22 @@ app.post("/event/:id/submitForm", isLoggedIn, upload.any(), async (req, res) => 
     }
 
     const curruser = await User.findById(req.user.id);
-    curruser.enrolledEvents.push(req.params.id);
-    await curruser.save;
+    
+    let alreadyEnrolled = 0;
+    for(let c in curruser.enrolledEvents){
+        if(c==req.params.id) {
+            alreadyEnrolled = 1;
+            break;
+        }
+    }
 
-    collection.findOne({ "Event": req.params.id }).then((resp) => {
+    if(alreadyEnrolled){
+        return res.redirect('/home');
+    }
+    
+    let l=0;
+
+    await collection.findOne({ "Event": req.params.id }).then((resp) => {
         data = resp;
         if (!data["applicants"]) {
             data["applicants"] = []
@@ -182,15 +201,24 @@ app.post("/event/:id/submitForm", isLoggedIn, upload.any(), async (req, res) => 
         req.body["files"] = files;
         req.body["status"] = "pending";
         data["applicants"].push(req.body);
+
+        l = data["applicants"].length-1;
+        console.log(l);
         collection.findOneAndReplace({ "Event": req.params.id }, data).then((resp) => {
-            res.redirect("/allevents");
         })
     })
+
+    const temp = req.params.id + ' ' + l;
+
+    curruser.enrolledEvents.push(temp);
+    await curruser.save();
+    return res.redirect("/allevents");
 })
 
 //ADMIN
+// event applications
 app.get("/event/:id/view", isLoggedIn, (req, res) => {
-    if (user == "admin") {
+    if (req.user && req.user.isAdmin === true) {
         res.sendFile('index.html', { root: path.join(__dirname, '../build/') });
     } else {
         res.send("You are not allowed to view this page");
@@ -199,7 +227,7 @@ app.get("/event/:id/view", isLoggedIn, (req, res) => {
 
 //ADMIN
 app.get("/event/:id/data", isLoggedIn, (req, res) => {
-    if (user == "admin") {
+    if (req.user && req.user.isAdmin === true) {
         collection.findOne({ "Event": req.params.id }).then((resp) => {
             res.json(resp);
         })
@@ -210,7 +238,7 @@ app.get("/event/:id/data", isLoggedIn, (req, res) => {
 
 //ADMIN
 app.get('/createEvent', isLoggedIn, (req, res) => {
-    if (user == "admin") {
+    if (req.user && req.user.isAdmin === true) {
         res.sendFile('index.html', { root: path.join(__dirname, '../build/') });
     } else {
         res.send("You are not allowed to view this page");
@@ -219,7 +247,7 @@ app.get('/createEvent', isLoggedIn, (req, res) => {
 
 //ADMIN
 app.post("/createEvent", isLoggedIn, (req, res) => {
-    if (user == "admin") {
+    if (req.user && req.user.isAdmin === true) {
         collection.countDocuments({ "_id": { "$exists": true } }).then((resp) => {
             req.body["Event"] = (resp + 1).toString();
             req.body["isOngoing"] = false;
@@ -235,7 +263,7 @@ app.post("/createEvent", isLoggedIn, (req, res) => {
 
 //ADMIN
 app.post("/event/:id/updatestatus", isLoggedIn, (req, res) => {
-    if (user == "admin") {
+    if (req.user && req.user.isAdmin === true) {
         collection.findOne({ "Event": req.params.id }).then((resp) => {
             resp.applicants[req.body.studId].status = req.body.status;
             collection.findOneAndReplace({ "Event": req.params.id }, resp).then((resp) => {
@@ -251,7 +279,7 @@ app.get("/event", (req, res) => {
     res.sendFile("index.html", { root: path.join(__dirname, "../build/") });
 })
 
-app.get("/allevents", isLoggedIn, (req, res) => {
+app.get("/allevents", (req, res) => {
     collection.find({}).toArray((err, result) => {
         fResult = {};
         for (var i = 0; i < result.length; i++) {
@@ -276,24 +304,59 @@ function makeid(length) {
 }
 
 //ADMIN
-app.post("/sendmentor", isLoggedIn, (req, res) => {
+const mentorCollection = database.collection("mentors");
+
+app.post("/sendmentor", isLoggedIn, async (req, res) => {
     const mentorMail = req.body.emailID;
-    const applicants = req.applicants;
-    // Add the mentorID, applicants to a document in the database.
+    const applicants = req.body.applicants;
+    
     const mentorID = Date.now();
     const password = makeid(16);
-    console.log(mentorMail, mentorID, password);
+    
+    const data = {id: mentorID.toString(), mail: mentorMail, applicants: applicants}
+    mentorCollection.insertOne(data);
+
+    const makeUser = new User({ mentorID, mentorMail, isVerified: true});
+    const result = await User.register(makeUser, password); // auto saved
+    return res.redirect('/home');
 })
 
 //MENTOR
-app.get("/mentor/view", isLoggedIn, (req, res) => {
-    const mentorID = req.id;
-    // Find the entry with mentorID and send the data as json.
+app.get("/mentor/:id/view", isLoggedIn, (req, res) => {
+    const mentorID = req.params.id;
+    mentorCollection.findOne({ "id": mentorID }).then((resp) => {
+        res.json(resp);
+    })
 })
 
 //MENTOR
-app.post("/mentor/update", isLoggedIn, (req, res) => {
-    //update status in the DB
+app.post("/mentor/:id/update", (req, res) => {
+    const applicantID = req.body.applicantID;
+    
+    mentorCollection.findOne({ "id": req.params.id }).then((resp) => {
+        resp.applicants[applicantID].status = req.body.status;
+        mentorCollection.findOneAndReplace({ "id": req.params.id }, resp).then((resp) => {
+            res.send(resp);
+        })
+    })
+})
+
+app.get('/user/profile', async(req, res) => {
+    const currUser = await User.findById(req.user.id);
+    const currUserName = currUser.username;
+    const currUserEmail = currUser.email;
+
+    let userEvents = [];
+    for(let e of currUser.enrolledEvents){
+        const [id, index] = e.split(" "); // event's id is 'id', and index of this user in applications is 'index'
+        await collection.findOne({ "Event": id }).then((resp) => {
+            userEvents.push({name: resp.eventName,  status: resp.applicants[index].status});
+        })
+    }
+    
+    console.log(userEvents, currUserEmail, currUserName); 
+    // we should send events, username, mail
+    return res.send('done');
 })
 
 
