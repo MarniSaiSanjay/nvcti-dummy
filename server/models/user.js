@@ -15,10 +15,10 @@ const userSchema = new Schema({
     },
     isAdmin: {
         type: Boolean,
-        default: false
+        default: true
     },
     enrolledEvents: [{
-        type : String
+        type : String, // event_id + ' ' + index
     }]
 })
 
